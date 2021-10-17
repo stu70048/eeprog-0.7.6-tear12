@@ -169,6 +169,8 @@ static void confirm_action()
 static int read_from_eeprom(struct eeprom *e, FILE *fp, int addr, int size, int hex)
 {
 	int ch, i;
+	if(!hex)
+		fprintf(fp, "\n");
 	for(i = 0; i < size; ++i, ++addr)
 	{
 		die_if((ch = eeprom_read_byte(e, addr)) < 0, "read error");
@@ -182,7 +184,11 @@ static int read_from_eeprom(struct eeprom *e, FILE *fp, int addr, int size, int 
 		} else 
 			putc(ch, fp);
 	}
-	if(hex)
+	//if(hex)
+	//	fprintf(fp, "\n\n");
+	if(!hex && eeprom_read_byte(e, addr-1) == 0x0a)
+		fprintf(fp, "\n");
+	else 
 		fprintf(fp, "\n\n");
 	fflush(fp);
 	return 0;
@@ -195,6 +201,17 @@ static int write_to_eeprom(struct eeprom *e, FILE *fp, int addr)
 	{
 		print_info(".");
 		fflush(stdout);
+		die_if(eeprom_write_byte(e, addr++, c), "write error");
+	}
+	print_info("\n\n");
+	return 0;
+}
+
+static int write_to_eeprom_erase(struct eeprom *e, FILE *fp, int addr, int size)
+{
+	int c=0xff, i;
+	for(i = 0;i < size; i++){
+		print_info(".");
 		die_if(eeprom_write_byte(e, addr++, c), "write error");
 	}
 	print_info("\n\n");
@@ -221,7 +238,7 @@ int main(int argc, char** argv)
 	input_fp = stdin;
 	output_fp = stdout;
 
-	while((ret = getopt(argc, argv, "1:8fr:qhw:xdt:i:o:")) != -1)
+	while((ret = getopt(argc, argv, "1:8fr:e:qhw:xdt:i:o:")) != -1)
 	{
 		switch(ret)
 		{
@@ -269,7 +286,7 @@ int main(int argc, char** argv)
 
 	usage_if(op == 0); // no switches 
 	// set device and i2c_addr reading from cmdline or env
-	device = i2c_addr_s = 0;
+
 	switch(argc - optind)
 	{
 	case 0:
@@ -293,12 +310,14 @@ int main(int argc, char** argv)
 	default:
 		usage_if(1);
 	}
+	print_info("device=%s\ti2c_addr_s=%s\n", device, i2c_addr_s);
 	usage_if(!device || !i2c_addr_s);
 	die_if(parse_arg(i2c_addr_s, &i2c_addr, NULL) != 1 || i2c_addr < 0, "I2C address -- invalid argument");
 	ret = parse_arg(arg, &memaddr, &size);
 	die_if(op == 'r' && (ret == -1 || memaddr < 0 || size < 0), "-r -- invalid argument");
 	die_if(op == 'w' && (ret != 1 || memaddr < 0), "-w -- invalid argument");
-
+	die_if(op == 'e' && (ret == -1 || memaddr < 0 || size < 0), "-e -- invalid argument");
+	
 	print_info("eeprog %s, a 24Cxx EEPROM reader/writer\n", VERSION);
 	print_info("Copyright (c) 2003-2004 by Stefano Barbato - All rights reserved.\n");
 	print_info("Copyright (c) 2011 by Kris Rusocki - All rights reserved.\n");
@@ -375,6 +394,27 @@ int main(int argc, char** argv)
 		print_info("  Writing %s starting at address 0x%x\n",
 			input_file, memaddr);
 		write_to_eeprom(&e, input_fp, memaddr);
+		break;
+	case 'e':
+		if(force == 0) {
+			/* Don't read data from a terminal */
+			die_if(isatty(fileno(input_fp)) == 1,
+				"refusing to read data from a terminal\n"
+				"\n"
+				"Use -i to provide input file or -f to force."
+			);
+
+			/* Confirmation must come from a terminal */
+			die_if(isatty(0) == 0,
+				"stdin is not a terminal"
+				"\n"
+				"Use -f to force."
+			);
+			confirm_action();
+		}
+		print_info("  Writing %s starting at address 0x%x\n",
+			input_file, memaddr);
+		write_to_eeprom_erase(&e, input_fp, memaddr, size);
 		break;
 	default:
 		usage_if(1);
